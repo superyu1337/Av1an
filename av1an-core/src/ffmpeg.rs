@@ -172,12 +172,6 @@ pub fn encode_audio<S: AsRef<OsStr>>(
       "-dn",
       "-map",
       "0",
-      "-map",
-      "-0:a",
-      "-c",
-      "copy",
-      "-map",
-      "0:a",
     ]);
 
     encode_audio.args(audio_params);
