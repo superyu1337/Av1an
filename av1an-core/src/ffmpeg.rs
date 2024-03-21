@@ -165,14 +165,27 @@ pub fn encode_audio<S: AsRef<OsStr>>(
     encode_audio.args(["-y", "-hide_banner", "-loglevel", "error", "-i"]);
     encode_audio.arg(input);
 
-    encode_audio.args([
-      "-map_metadata",
-      "0",
-      "-vn",
-      "-dn",
-      "-map",
-      "0",
-    ]);
+    if audio_params.is_empty() {
+      encode_audio.args([
+        "-map_metadata",
+        "0",
+        "-vn",
+        "-dn",
+        "-map",
+        "0",
+        "-c",
+        "copy",
+      ]);
+    } else {
+      encode_audio.args([
+        "-map_metadata",
+        "0",
+        "-vn",
+        "-dn",
+        "-map",
+        "0",
+      ]);
+    }
 
     encode_audio.args(audio_params);
     encode_audio.arg(&audio_file);
