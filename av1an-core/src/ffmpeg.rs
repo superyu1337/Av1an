@@ -184,6 +184,8 @@ pub fn encode_audio<S: AsRef<OsStr>>(
         "-dn",
         "-map",
         "0",
+        "-c",
+        "copy"
       ]);
     }
 
