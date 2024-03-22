@@ -229,8 +229,9 @@ impl Av1anContext {
         let input = self.args.input.as_video_path();
         let temp = self.args.temp.as_str();
         let audio_params = self.args.audio_params.as_slice();
+        let opus_mode = self.args.opus_mode;
         Some(s.spawn(move |_| {
-          let audio_output = crate::ffmpeg::encode_audio(input, temp, audio_params);
+          let audio_output = crate::ffmpeg::encode_audio(input, temp, opus_mode, audio_params);
           get_done().audio_done.store(true, atomic::Ordering::SeqCst);
 
           let progress_file = Path::new(temp).join("done.json");

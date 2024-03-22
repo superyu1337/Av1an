@@ -297,6 +297,7 @@ fn get_test_args() -> Av1anContext {
     zones: None,
     scaler: String::new(),
     ignore_frame_mismatch: false,
+    opus_mode: false,
   };
   Av1anContext {
     vs_script: None,

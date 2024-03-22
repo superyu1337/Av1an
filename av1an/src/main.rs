@@ -314,6 +314,13 @@ pub struct CliOpts {
   #[clap(short, long, allow_hyphen_values = true, help_heading = "Encoding")]
   pub audio_params: Option<String>,
 
+  /// OPUS Mode
+  /// 
+  /// Encode all lossless audio streams to opus using libopus.
+  /// Automatically adjusts bitrate using channel count
+  #[clap(short, long, help_heading = "Encoding")]
+  pub opus_mode: bool,
+
   /// FFmpeg filter options
   #[clap(
     short = 'f',
@@ -767,6 +774,7 @@ pub fn parse_cli(args: CliOpts) -> anyhow::Result<Vec<EncodeArgs>> {
         scaler
       },
       ignore_frame_mismatch: args.ignore_frame_mismatch,
+        opus_mode: args.opus_mode,
     };
 
     if !args.overwrite {

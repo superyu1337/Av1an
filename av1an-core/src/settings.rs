@@ -66,6 +66,7 @@ pub struct EncodeArgs {
   // FFmpeg params
   pub ffmpeg_filter_args: Vec<String>,
   pub audio_params: Vec<String>,
+  pub opus_mode: bool,
   pub input_pix_format: InputPixelFormat,
   pub output_pix_format: PixelFormat,
 

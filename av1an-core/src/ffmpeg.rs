@@ -142,6 +142,18 @@ pub fn has_audio(file: &Path) -> bool {
   ictx.streams().best(MediaType::Audio).is_some()
 }
 
+pub fn get_opus_params(file: &Path) -> Vec<String> {
+  let ictx = input(&file).unwrap();
+
+  for stream in ictx.streams() {
+    if stream.codec().is_audio() {
+      
+    }
+  }
+
+  Vec::new()
+}
+
 /// Encodes the audio using FFmpeg, blocking the current thread.
 ///
 /// This function returns `Some(output)` if the audio exists and the audio
@@ -150,6 +162,7 @@ pub fn has_audio(file: &Path) -> bool {
 pub fn encode_audio<S: AsRef<OsStr>>(
   input: impl AsRef<Path>,
   temp: impl AsRef<Path>,
+  opus_mode: bool,
   audio_params: &[S],
 ) -> Option<PathBuf> {
   let input = input.as_ref();
@@ -179,8 +192,13 @@ pub fn encode_audio<S: AsRef<OsStr>>(
       "-map",
       "0:a",
     ]);
+    
+    if opus_mode {
 
-    encode_audio.args(audio_params);
+    } else {
+      encode_audio.args(audio_params);
+    }
+
     encode_audio.arg(&audio_file);
 
     let output = encode_audio.output().unwrap();
