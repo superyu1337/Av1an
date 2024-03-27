@@ -316,8 +316,8 @@ pub struct CliOpts {
 
   /// OPUS Mode
   /// 
-  /// Encode all lossless audio streams to opus using opusenc.  
-  /// Automatically adjusts bitrate using channel count.
+  /// Encode all audio streams to opus using opusenc.  
+  /// Automatically adjusts bitrate using channel layout.
   /// 
   /// The bitrate formular is as follows:
   /// 128 * (channel_layout / 2.0)^0.75
