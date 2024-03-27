@@ -4,7 +4,8 @@ use std::process::{Command, Stdio};
 
 use ffmpeg::color::TransferCharacteristic;
 use ffmpeg::format::{input, Pixel};
-use ffmpeg::media::Type as MediaType;
+use ffmpeg::media::{self, Type as MediaType};
+use ffmpeg::ChannelLayout;
 use ffmpeg::Error::StreamNotFound;
 use path_abs::{PathAbs, PathInfo};
 
@@ -142,16 +143,98 @@ pub fn has_audio(file: &Path) -> bool {
   ictx.streams().best(MediaType::Audio).is_some()
 }
 
-pub fn get_opus_params(file: &Path) -> Vec<String> {
-  let ictx = input(&file).unwrap();
+pub fn get_channel_layout_float(stream: &ffmpeg::Stream<'_>) -> f32 {
+  let layout_bits: u64 = unsafe { (*stream.parameters().as_ptr()).ch_layout.u.mask };
+  let channels: i32 = unsafe { (*stream.parameters().as_ptr()).ch_layout.nb_channels };
 
-  for stream in ictx.streams() {
-    if stream.codec().is_audio() {
-      
-    }
+  match ChannelLayout::from_bits(layout_bits) {
+    Some(layout) => {
+      return match layout {
+        ChannelLayout::_2POINT1 | ChannelLayout::_2_1 => 2.1,
+        ChannelLayout::_2_2 => 2.2,
+        ChannelLayout::_3POINT1 => 3.1,
+        ChannelLayout::_4POINT1 => 4.1,
+        ChannelLayout::_5POINT1 | ChannelLayout::_5POINT1_BACK => 5.1,
+        ChannelLayout::_6POINT1 | ChannelLayout::_6POINT1_FRONT | ChannelLayout::_6POINT1_BACK => 6.1,
+        ChannelLayout::_7POINT1 | ChannelLayout::_7POINT1_WIDE | ChannelLayout::_7POINT1_WIDE_BACK => 7.1,
+        _ => channels as f32
+      };
+    },
+    None => {
+      return match channels {
+        3 => 2.1,
+        6 => 5.1,
+        8 => 7.1,
+        _ => channels as f32
+      };
+    },
   }
+}
 
-  Vec::new()
+pub fn handle_opus(input: &Path, merge_with: &Path, output: &Path, temp: &Path) {
+  let ictx = ffmpeg::format::input(&input).unwrap();
+
+  std::fs::create_dir(temp.join("audio")).expect("Failed to create audio folder");
+
+  let audio_data = ictx
+    .streams()
+    .filter(|f| f.parameters().medium() == media::Type::Audio)
+    .fold(Vec::new(), |mut vec, stream| {
+      let layout = get_channel_layout_float(&stream);
+      let bitrate = (128.0 * (layout / 2.0).powf(0.75)).round() as usize;
+
+      let ffmpeg = Command::new("ffmpeg")
+        .args(["-hide_banner", "-v", "quiet", "-i"])
+        .arg(input.to_str().unwrap())
+        .args(["-vn", "-sn", "-dn", "-map"])
+        .arg(format!("0:a:{}", stream.id()))
+        .args(["-map_metadata".to_owned(), format!("0:s:a:{}", stream.id())])
+        .args(["-f", "flac", "-"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("ffmpeg failed to start");
+
+      let mut opusenc = Command::new("opusenc")
+        .args(["--quiet", "--vbr", "--bitrate"])
+        .arg(format!("{bitrate}K"))
+        .arg("-")
+        .arg(format!("{}/audio/{}.opus", temp.to_string_lossy(), stream.id()))
+        .stdin(Stdio::from(ffmpeg.stdout.unwrap()))
+        .spawn()
+        .expect("opusenc failed to start");
+
+      opusenc.wait().expect("Opusenc crashed");
+
+      vec.push(
+        stream.id()
+      );
+
+      vec
+    });
+
+  let args = audio_data
+    .iter()
+    .fold((Vec::new(), Vec::new()), |mut args, a| {
+      args.0.push(format!("-i"));
+      args.0.push(format!("{}/audio/{}.opus", temp.to_string_lossy(), a));
+      args.1.push(format!("-map"));
+      args.1.push(format!("{}", a));
+      args
+    });
+
+  let mut ffmpeg_merge = Command::new("ffmpeg")
+    .args(["-y", "-hide_banner", "-v", "warning"])
+    .args(&args.0)
+    .arg("-i")
+    .arg(merge_with.to_str().unwrap())
+    .args(&args.1)
+    .args(["-map".to_owned(), format!("{}", audio_data.len())])
+    .args(["-c", "copy"])
+    .arg(output.to_str().unwrap())
+    .spawn()
+    .expect("ffmpeg failed to start");
+
+  ffmpeg_merge.wait().expect("ffmpeg crashed while merging");
 }
 
 /// Encodes the audio using FFmpeg, blocking the current thread.
@@ -169,7 +252,10 @@ pub fn encode_audio<S: AsRef<OsStr>>(
   let temp = temp.as_ref();
 
   if has_audio(input) {
-    let audio_file = Path::new(temp).join("audio.mkv");
+    let audio_file = match opus_mode {
+        true => Path::new(temp).join("misc.mkv"),
+        false => Path::new(temp).join("audio.mkv"),
+    };
     let mut encode_audio = Command::new("ffmpeg");
 
     encode_audio.stdout(Stdio::piped());
@@ -185,20 +271,15 @@ pub fn encode_audio<S: AsRef<OsStr>>(
       "-dn",
       "-map",
       "0",
-      "-map",
-      "-0:a",
       "-c",
-      "copy",
-      "-map",
-      "0:a",
+      "copy"
     ]);
+
+    match opus_mode {
+        true => encode_audio.arg("-an"),
+        false => encode_audio.args(audio_params),
+    };
     
-    if opus_mode {
-
-    } else {
-      encode_audio.args(audio_params);
-    }
-
     encode_audio.arg(&audio_file);
 
     let output = encode_audio.output().unwrap();
@@ -209,9 +290,18 @@ pub fn encode_audio<S: AsRef<OsStr>>(
         output, encode_audio
       );
       return None;
-    }
+    } else if opus_mode {
+      handle_opus(
+        input, 
+        &audio_file, 
+        Path::new(temp).join("audio.mkv").as_path(),
+        temp
+      );
 
-    Some(audio_file)
+      Some(Path::new(temp).join("audio.mkv"))
+    } else {
+      Some(audio_file)
+    }
   } else {
     None
   }
