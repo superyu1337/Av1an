@@ -316,9 +316,18 @@ pub struct CliOpts {
 
   /// OPUS Mode
   /// 
-  /// Encode all lossless audio streams to opus using libopus.
-  /// Automatically adjusts bitrate using channel count
-  #[clap(short, long, help_heading = "Encoding")]
+  /// Encode all lossless audio streams to opus using opusenc.  
+  /// Automatically adjusts bitrate using channel count.
+  /// 
+  /// The bitrate formular is as follows:
+  /// 128 * (channel_layout / 2.0)^0.75
+  /// 
+  /// Bitrates for various layouts:
+  /// - 2.0: 128k
+  /// - 2.1: 133k
+  /// - 5.1: 258k
+  /// - 7.1: 331k
+  #[clap(long, help_heading = "Encoding", verbatim_doc_comment)]
   pub opus_mode: bool,
 
   /// FFmpeg filter options

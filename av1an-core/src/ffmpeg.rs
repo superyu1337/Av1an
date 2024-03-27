@@ -174,7 +174,9 @@ pub fn get_channel_layout_float(stream: &ffmpeg::Stream<'_>) -> f32 {
 pub fn handle_opus(input: &Path, merge_with: &Path, output: &Path, temp: &Path) {
   let ictx = ffmpeg::format::input(&input).unwrap();
 
-  std::fs::create_dir(temp.join("audio")).expect("Failed to create audio folder");
+  if !temp.join("audio").exists() {
+    std::fs::create_dir(temp.join("audio")).expect("Failed to create audio folder");
+  }
 
   let audio_data = ictx
     .streams()
@@ -187,8 +189,8 @@ pub fn handle_opus(input: &Path, merge_with: &Path, output: &Path, temp: &Path) 
         .args(["-hide_banner", "-v", "quiet", "-i"])
         .arg(input.to_str().unwrap())
         .args(["-vn", "-sn", "-dn", "-map"])
-        .arg(format!("0:a:{}", stream.id()))
-        .args(["-map_metadata".to_owned(), format!("0:s:a:{}", stream.id())])
+        .arg(format!("0:{}", stream.index()))
+        .args(["-map_metadata".to_owned(), format!("0:s:{}", stream.index())])
         .args(["-f", "flac", "-"])
         .stdout(Stdio::piped())
         .spawn()
@@ -198,7 +200,7 @@ pub fn handle_opus(input: &Path, merge_with: &Path, output: &Path, temp: &Path) 
         .args(["--quiet", "--vbr", "--bitrate"])
         .arg(format!("{bitrate}K"))
         .arg("-")
-        .arg(format!("{}/audio/{}.opus", temp.to_string_lossy(), stream.id()))
+        .arg(format!("{}/audio/{}.opus", temp.to_string_lossy(), stream.index()))
         .stdin(Stdio::from(ffmpeg.stdout.unwrap()))
         .spawn()
         .expect("opusenc failed to start");
@@ -206,29 +208,30 @@ pub fn handle_opus(input: &Path, merge_with: &Path, output: &Path, temp: &Path) 
       opusenc.wait().expect("Opusenc crashed");
 
       vec.push(
-        stream.id()
+        stream.index()
       );
 
       vec
     });
 
-  let args = audio_data
+  let (input_args, map_args, map_counter) = audio_data
     .iter()
-    .fold((Vec::new(), Vec::new()), |mut args, a| {
-      args.0.push(format!("-i"));
-      args.0.push(format!("{}/audio/{}.opus", temp.to_string_lossy(), a));
-      args.1.push(format!("-map"));
-      args.1.push(format!("{}", a));
-      args
+    .fold((Vec::new(), Vec::new(), 0usize), |(mut input_args, mut map_args, mut c), a| {
+      input_args.push(format!("-i"));
+      input_args.push(format!("{}/audio/{}.opus", temp.to_string_lossy(), a));
+      map_args.push(format!("-map"));
+      map_args.push(format!("{}", c));
+      c += 1;
+      (input_args, map_args, c)
     });
 
   let mut ffmpeg_merge = Command::new("ffmpeg")
-    .args(["-y", "-hide_banner", "-v", "warning"])
-    .args(&args.0)
+    .args(["-y", "-hide_banner", "-v", "quiet"])
+    .args(&input_args)
     .arg("-i")
     .arg(merge_with.to_str().unwrap())
-    .args(&args.1)
-    .args(["-map".to_owned(), format!("{}", audio_data.len())])
+    .args(&map_args)
+    .args(["-map".to_owned(), format!("{}", map_counter)])
     .args(["-c", "copy"])
     .arg(output.to_str().unwrap())
     .spawn()
