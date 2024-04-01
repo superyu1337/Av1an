@@ -230,6 +230,7 @@ pub fn handle_opus(input: &Path, merge_with: &Path, output: &Path, temp: &Path) 
     .args(&input_args)
     .arg("-i")
     .arg(merge_with.to_str().unwrap())
+    .args(["-map 0:s"]) // Only map the subtitle streams
     .args(&map_args)
     .args(["-map".to_owned(), format!("{}", map_counter)])
     .args(["-c", "copy"])
@@ -279,7 +280,7 @@ pub fn encode_audio<S: AsRef<OsStr>>(
     ]);
 
     match opus_mode {
-        true => encode_audio.arg("-an"),
+        true => {encode_audio.args(["-map", "0:a:0"])}, // We need one audio track to keep the subtitles in sync.
         false => encode_audio.args(audio_params),
     };
     
