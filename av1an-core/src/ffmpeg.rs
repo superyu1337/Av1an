@@ -186,7 +186,7 @@ pub fn handle_opus(input: &Path, merge_with: &Path, output: &Path, temp: &Path) 
       let bitrate = (128.0 * (layout / 2.0).powf(0.75)).round() as usize;
 
       let ffmpeg = Command::new("ffmpeg")
-        .args(["-hide_banner", "-v", "quiet", "-i"])
+        .args(["-hide_banner", "-v", "error", "-i"])
         .arg(input.to_str().unwrap())
         .args(["-vn", "-sn", "-dn", "-map"])
         .arg(format!("0:{}", stream.index()))
@@ -226,13 +226,13 @@ pub fn handle_opus(input: &Path, merge_with: &Path, output: &Path, temp: &Path) 
     });
 
   let mut ffmpeg_merge = Command::new("ffmpeg")
-    .args(["-y", "-hide_banner", "-v", "quiet"])
+    .args(["-y", "-hide_banner", "-v", "error"])
     .args(&input_args)
     .arg("-i")
     .arg(merge_with.to_str().unwrap())
-    .args(["-map 0:s"]) // Only map the subtitle streams
     .args(&map_args)
-    .args(["-map".to_owned(), format!("{}", map_counter)])
+    .args(["-map".to_owned(), format!("{}:s?", map_counter)])
+    .args(["-map".to_owned(), format!("{}:t?", map_counter)])
     .args(["-c", "copy"])
     .arg(output.to_str().unwrap())
     .spawn()
@@ -280,8 +280,10 @@ pub fn encode_audio<S: AsRef<OsStr>>(
     ]);
 
     match opus_mode {
-        true => {encode_audio.args(["-map", "0:a:0"])}, // We need one audio track to keep the subtitles in sync.
-        false => encode_audio.args(audio_params),
+        true => {},
+        false => {
+          encode_audio.args(audio_params);
+        },
     };
     
     encode_audio.arg(&audio_file);
