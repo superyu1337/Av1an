@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use ffmpeg::color::TransferCharacteristic;
 use ffmpeg::format::{input, Pixel};
 use ffmpeg::media::{self, Type as MediaType};
-use ffmpeg::ChannelLayout;
+use ffmpeg::ChannelLayoutMask;
 use ffmpeg::Error::StreamNotFound;
 use path_abs::{PathAbs, PathInfo};
 
@@ -149,16 +149,16 @@ pub fn get_channel_layout_float(stream: &ffmpeg::Stream<'_>) -> f32 {
   let layout_bits: u64 = unsafe { (*stream.parameters().as_ptr()).ch_layout.u.mask };
   let channels: i32 = unsafe { (*stream.parameters().as_ptr()).ch_layout.nb_channels };
 
-  match ChannelLayout::from_bits(layout_bits) {
+  match ChannelLayoutMask::from_bits(layout_bits) {
     Some(layout) => {
       return match layout {
-        ChannelLayout::_2POINT1 | ChannelLayout::_2_1 => 2.1,
-        ChannelLayout::_2_2 => 2.2,
-        ChannelLayout::_3POINT1 => 3.1,
-        ChannelLayout::_4POINT1 => 4.1,
-        ChannelLayout::_5POINT1 | ChannelLayout::_5POINT1_BACK => 5.1,
-        ChannelLayout::_6POINT1 | ChannelLayout::_6POINT1_FRONT | ChannelLayout::_6POINT1_BACK => 6.1,
-        ChannelLayout::_7POINT1 | ChannelLayout::_7POINT1_WIDE | ChannelLayout::_7POINT1_WIDE_BACK => 7.1,
+        ChannelLayoutMask::_2POINT1 | ChannelLayoutMask::_2_1 => 2.1,
+        ChannelLayoutMask::_2_2 => 2.2,
+        ChannelLayoutMask::_3POINT1 => 3.1,
+        ChannelLayoutMask::_4POINT1 => 4.1,
+        ChannelLayoutMask::_5POINT1 | ChannelLayoutMask::_5POINT1_BACK => 5.1,
+        ChannelLayoutMask::_6POINT1 | ChannelLayoutMask::_6POINT1_FRONT | ChannelLayoutMask::_6POINT1_BACK => 6.1,
+        ChannelLayoutMask::_7POINT1 | ChannelLayoutMask::_7POINT1_WIDE | ChannelLayoutMask::_7POINT1_WIDE_BACK => 7.1,
         _ => channels as f32
       };
     },
