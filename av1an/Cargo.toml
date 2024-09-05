@@ -1,6 +1,6 @@
 [package]
 name = "av1an"
-version = "0.4.1"
+version = "0.4.3"
 authors = ["Zen <master_of_zen@protonmail.com>"]
 description = """
 Cross-platform command-line AV1 / VP9 / HEVC / H264 encoding framework with per scene quality encoding [Command line library]
@@ -18,7 +18,6 @@ name = "av1an"
 path = "src/main.rs"
 
 [dependencies]
-atty = "0.2.14"
 clap = { version = "4.0.32", features = ["derive"] }
 shlex = "1.3.0"
 path_abs = "0.5.1"
@@ -33,9 +32,9 @@ version = "0.28.0"
 default-features = false
 features = ["colors"]
 
-[build-dependencies.vergen]
-version = "8.1.1"
-features = ["git", "git2", "build", "rustc", "cargo"]
+[build-dependencies.vergen-git2]
+version = "1.0.0"
+features = ["build", "rustc", "cargo"]
 
 [dependencies.ffmpeg]
 package = "ffmpeg-the-third"

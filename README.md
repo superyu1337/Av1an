@@ -57,7 +57,7 @@ Note that Av1an requires the executable encoder. If you use a package manager to
 
 ## Installation
 
-av1an can be installed from package managers, cargo.io, or compliled manually. There are also pre-built [Docker images](/docs/DOCKER.md) which include all dependencies and are frequently updated.
+av1an can be installed from package managers, cargo.io, or compliled manually. There are also pre-built [Docker images](/site/src/docker.md) which include all dependencies and are frequently updated.
 
 For Windows users, prebuilt binaries are also included in every [release](https://github.com/master-of-zen/Av1an/releases), and a [nightly build](https://github.com/master-of-zen/Av1an/releases/tag/latest) of the current `master` branch is also available.
 
@@ -76,7 +76,7 @@ Prerequisites:
 
 Optional:
 
-- [L-SMASH](https://github.com/AkarinVS/L-SMASH-Works) VapourSynth plugin for better chunking (recommended)
+- [L-SMASH](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) VapourSynth plugin for better chunking (recommended)
 - [DGDecNV](https://www.rationalqm.us/dgdecnv/dgdecnv.html) Vapoursynth plugin for very fast and accurate chunking, `dgindexnv` executable needs to be present in system path and an NVIDIA GPU with CUVID 
 - [ffms2](https://github.com/FFMS/ffms2) VapourSynth plugin for better chunking
 - [bestsource](https://github.com/vapoursynth/bestsource) Vapoursynth plugin for slow but accurate chunking
