@@ -18,6 +18,8 @@
 | [Concatenation Method](#concatenation-method--c---concat)               | `-c`, `--concat`          | `CONCAT`       | `mkvmerge`       |
 | [Pixel Format](#pixel-format---pix-format)                              | `--pix-format`            | `PIX_FORMAT`   | `yuv420p10le`    |
 | [Zones](#zones---zones)                                                 | `-z`, `--zones`           | Path           |
+[Cache Index Mode](#Cache-Index-mode---cache-mode) | `--cache-mode` | `CacheMode` | `source`
+[Pixel Format Converter](#Pixel-Format-Converter---pix-format-converter) | `--pix-format-converter` | `PIX_FORMAT_CONVERTER` | `ffmpeg`
 
 ## Encoder `-e`, `--encoder`
 
@@ -307,3 +309,39 @@ Line 2 will encode frames 169-1329 using rav1e with only the arguments `-s 3 -q 
 
 [ffmpeg-libopus]: https://ffmpeg.org/ffmpeg-codecs.html#libopus-1
 [ffmpeg-aac]: https://ffmpeg.org/ffmpeg-codecs.html#aac
+
+
+## Cache Index Mode `--cache-mode`
+
+Set Cache index mode for source method.
+
+### Possible Values
+
+- `source` Place index file next to the source.
+- `temp` Place index file in temporary directory.
+
+### Default
+
+If not specified, `source` is used.
+
+### Examples
+
+- `> av1an -i input.mkv -o output.mkv --cache-mode temp` Place index file in temporary directory
+
+## Pixel Format Converter `--pix-format-converter`
+
+Set converter to use for converting pixel format this only affect video input. This option does not affect target quality pixel format converter
+
+### Possible Values
+
+- `ffmpeg` Use ffmpeg to convert pixel format.
+- `vs-resize` Use vapoursynth built in resize function to convert pixel format.
+
+### Default
+
+If not specified, `ffmpeg` is used.
+
+### Examples
+
+- `> av1an -i input.mkv -o output.mkv --pix-format-converter vs-resize` Use vapoursynth built in resize function to convert pixel format.
+- `> av1an -i input.mkv -o output.mkv --pix-format-converter ffmpeg` Use ffmpeg to convert pixel format.

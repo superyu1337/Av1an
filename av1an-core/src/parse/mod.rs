@@ -212,17 +212,38 @@ pub fn parse_rav1e_frames(s: &str) -> Option<u64> {
         .and_then(|s| s.parse().ok())
 }
 
-pub fn parse_svt_av1_frames(s: &str) -> Option<u64> {
-    const SVT_AV1_IGNORED_PREFIX: &str = "Encoding frame";
+pub fn parse_svt_av1_frames(input: &str) -> Option<u64> {
+    const SVT_AV1_LEGACY_PREFIX: &str = "Encoding frame";
+    const SVT_AV1_NEW_PREFIX: &str = "Encoding:";
 
-    if !s.starts_with(SVT_AV1_IGNORED_PREFIX) {
-        return None;
+    let stripped = strip_ansi_escape_sequences(input);
+    let s = stripped.as_ref();
+
+    // Handle the new progress format introduced in https://gitlab.com/AOMediaCodec/SVT-AV1/-/merge_requests/2511
+    if s.starts_with(SVT_AV1_NEW_PREFIX) {
+        let line = s.get(SVT_AV1_NEW_PREFIX.len()..)?.trim_start();
+        if let Some((frames, _)) = line.split_once('/') {
+            if let Ok(frames) = frames.parse() {
+                // Frame count is known
+                return Some(frames);
+            }
+        }
+
+        // Frame count unknown
+        return line.split_ascii_whitespace().next().and_then(|s| s.parse().ok());
     }
 
-    s.get(SVT_AV1_IGNORED_PREFIX.len()..)?
-        .split_ascii_whitespace()
-        .next()
-        .and_then(|s| s.parse().ok())
+    // Old progress format
+    if s.starts_with(SVT_AV1_LEGACY_PREFIX) {
+        return s
+            .get(SVT_AV1_LEGACY_PREFIX.len()..)?
+            .split_ascii_whitespace()
+            .next()
+            .and_then(|s| s.parse().ok());
+    }
+
+    // Unrecognized progress format
+    None
 }
 
 pub fn parse_x26x_frames(s: &str) -> Option<u64> {
@@ -230,6 +251,38 @@ pub fn parse_x26x_frames(s: &str) -> Option<u64> {
         .find(|part| !part.starts_with('['))
         .map(|val| val.split_once('/').map_or(val, |(val, _)| val))
         .and_then(|s| s.parse().ok())
+}
+
+fn strip_ansi_escape_sequences(input: &str) -> Cow<'_, str> {
+    const ESC: char = '\x1b';
+
+    if !input.contains(ESC) {
+        return Cow::Borrowed(input);
+    }
+
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == ESC {
+            if matches!(chars.peek(), Some('[')) {
+                chars.next();
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            // Skip bare escape characters as well.
+            continue;
+        }
+
+        output.push(ch);
+    }
+
+    Cow::Owned(output)
 }
 
 /// Returns the set of valid parameters given a help text for the given encoder
