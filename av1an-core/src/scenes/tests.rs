@@ -18,6 +18,7 @@ fn get_test_args() -> Av1anContext {
         ffmpeg::FFPixelFormat,
         into_vec,
         settings::{EncodeArgs, InputPixelFormat, PixelFormat},
+        vapoursynth::CacheSource,
         ChunkMethod,
         ChunkOrdering,
         Input,
@@ -55,6 +56,7 @@ fn get_test_args() -> Av1anContext {
             temp:         String::new(),
             chunk_method: ChunkMethod::LSMASH,
             is_proxy:     false,
+            cache_mode:   CacheSource::SOURCE,
         },
         proxy:                 None,
         output_pix_format:     PixelFormat {
@@ -86,6 +88,8 @@ fn get_test_args() -> Av1anContext {
         vapoursynth_plugins:   None,
         dolby_vision_rpu:      None,
         hdr10plus_json:        None,
+        cache_mode:            CacheSource::SOURCE,
+        pix_format_converter:  crate::PixelFormatConverter::FFMPEG,
     };
     Av1anContext {
         vs_script: None,

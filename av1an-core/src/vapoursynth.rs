@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    fmt::Display,
     fs::{create_dir_all, File},
     io::Write,
     path::{absolute, Path, PathBuf},
@@ -9,6 +9,8 @@ use std::{
 use anyhow::{anyhow, bail, Context};
 use av_format::rational::Rational64;
 use path_abs::{PathAbs, PathInfo};
+use serde::{Deserialize, Serialize};
+use strum::{EnumString, IntoStaticStr};
 use tracing::info;
 use vapoursynth::{
     core::CoreRef,
@@ -18,7 +20,6 @@ use vapoursynth::{
 
 use super::ChunkMethod;
 use crate::{
-    ffmpeg::FFPixelFormat,
     metrics::{
         butteraugli::ButteraugliSubMetric,
         xpsnr::{weight_xpsnr, XPSNRSubMetric},
@@ -27,6 +28,23 @@ use crate::{
     Input,
     InputPixelFormat,
 };
+
+#[derive(
+    Serialize, PartialEq, Debug, Clone, Copy, EnumString, IntoStaticStr, Hash, Eq, Deserialize,
+)]
+pub enum CacheSource {
+    #[strum(serialize = "source")]
+    SOURCE,
+    #[strum(serialize = "temp")]
+    TEMP,
+}
+
+impl Display for CacheSource {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(<&'static str>::from(self))
+    }
+}
 
 /// Contains a list of installed Vapoursynth plugins which may be used by av1an
 #[derive(Debug, Clone, Copy)]
@@ -72,27 +90,14 @@ pub fn get_vapoursynth_plugins() -> anyhow::Result<VapoursynthPlugins> {
     let env = Environment::new().expect("Failed to initialize VapourSynth environment");
     let core = env.get_core().expect("Failed to get VapourSynth core");
 
-    let plugins = core.plugins();
-    let plugins = plugins
-        .keys()
-        .filter_map(|plugin| {
-            plugins
-                .get::<&[u8]>(plugin)
-                .ok()
-                .and_then(|slice| simdutf8::basic::from_utf8(slice).ok())
-                .and_then(|s| s.split(';').nth(1))
-                .map(ToOwned::to_owned)
-        })
-        .collect::<HashSet<_>>();
-
     Ok(VapoursynthPlugins {
-        lsmash:     plugins.contains(PluginId::Lsmash.as_str()),
-        ffms2:      plugins.contains(PluginId::Ffms2.as_str()),
-        dgdecnv:    plugins.contains(PluginId::DGDecNV.as_str()),
-        bestsource: plugins.contains(PluginId::BestSource.as_str()),
-        julek:      plugins.contains(PluginId::Julek.as_str()),
-        vszip:      if plugins.contains(PluginId::Vszip.as_str()) {
-            if is_vszip_r7_or_newer(&env) {
+        lsmash:     core.get_plugin_by_id(PluginId::Lsmash.as_str())?.is_some(),
+        ffms2:      core.get_plugin_by_id(PluginId::Ffms2.as_str())?.is_some(),
+        dgdecnv:    core.get_plugin_by_id(PluginId::DGDecNV.as_str())?.is_some(),
+        bestsource: core.get_plugin_by_id(PluginId::BestSource.as_str())?.is_some(),
+        julek:      core.get_plugin_by_id(PluginId::Julek.as_str())?.is_some(),
+        vszip:      if let Some(plugin) = core.get_plugin_by_id(PluginId::Vszip.as_str())? {
+            if is_vszip_r7_or_newer(plugin)? {
                 VSZipVersion::New
             } else {
                 VSZipVersion::Legacy
@@ -100,39 +105,15 @@ pub fn get_vapoursynth_plugins() -> anyhow::Result<VapoursynthPlugins> {
         } else {
             VSZipVersion::None
         },
-        vship:      plugins.contains(PluginId::Vship.as_str()),
+        vship:      core.get_plugin_by_id(PluginId::Vship.as_str())?.is_some(),
     })
 }
 
 // There is no way to get the version of a plugin
 // so check for a function signature instead
-fn is_vszip_r7_or_newer(env: &Environment) -> bool {
-    let core = env.get_core().expect("Failed to get VapourSynth core");
-
-    let vszip = get_plugin(core, PluginId::Vszip).expect("Failed to get vszip plugin");
-    let functions_map = vszip.functions();
-    let functions: Vec<(String, Vec<String>)> = functions_map
-        .keys()
-        .filter_map(|name| {
-            functions_map
-                .get::<&[u8]>(name)
-                .ok()
-                .and_then(|slice| simdutf8::basic::from_utf8(slice).ok())
-                .map(|f| {
-                    let mut split = f.split(';');
-                    (
-                        split.next().expect("Function name is missing").to_string(),
-                        split
-                            .filter(|s| !s.is_empty())
-                            .map(ToOwned::to_owned)
-                            .collect::<Vec<String>>(),
-                    )
-                })
-        })
-        .collect();
-
+fn is_vszip_r7_or_newer(plugin: Plugin) -> anyhow::Result<bool> {
     // R7 adds XPSNR and also introduces breaking changes the API
-    functions.iter().any(|(name, _)| name == "XPSNR")
+    Ok(plugin.get_plugin_function_by_name("XPSNR")?.is_some())
 }
 
 #[inline]
@@ -149,16 +130,10 @@ pub fn get_clip_info(source: &Input, vspipe_args_map: &OwnedMap) -> anyhow::Resu
             .eval_file(source.as_path(), EvalFlags::SetWorkingDir)
             .context(CONTEXT_MSG)?;
     } else {
-        environment
-            .eval_script(&source.as_script_text(None, None, None)?)
-            .context(CONTEXT_MSG)?;
+        environment.eval_script(&source.as_script_text()?).context(CONTEXT_MSG)?;
     }
 
-    #[cfg(feature = "vapoursynth_new_api")]
     let (node, _) = environment.get_output(OUTPUT_INDEX)?;
-    #[cfg(not(feature = "vapoursynth_new_api"))]
-    let node = environment.get_output(OUTPUT_INDEX).unwrap();
-
     let info = node.info();
 
     Ok(ClipInfo {
@@ -179,9 +154,6 @@ pub fn get_clip_info(source: &Input, vspipe_args_map: &OwnedMap) -> anyhow::Resu
 /// evaluated on a script.
 fn get_num_frames(info: &VideoInfo) -> anyhow::Result<usize> {
     let num_frames = {
-        if Property::Variable == info.format {
-            bail!("Cannot output clips with varying format");
-        }
         if Property::Variable == info.resolution {
             bail!("Cannot output clips with varying dimensions");
         }
@@ -189,20 +161,7 @@ fn get_num_frames(info: &VideoInfo) -> anyhow::Result<usize> {
             bail!("Cannot output clips with varying framerate");
         }
 
-        #[cfg(feature = "vapoursynth_new_api")]
-        let num_frames = info.num_frames;
-
-        #[cfg(not(feature = "vapoursynth_new_api"))]
-        let num_frames = {
-            match info.num_frames {
-                Property::Variable => {
-                    bail!("Cannot output clips with unknown length");
-                },
-                Property::Constant(x) => x,
-            }
-        };
-
-        num_frames
+        info.num_frames
     };
 
     assert!(num_frames != 0, "vapoursynth reported 0 frames");
@@ -223,14 +182,7 @@ fn get_frame_rate(info: &VideoInfo) -> anyhow::Result<Rational64> {
 /// Get the bit depth from an environment that has already been
 /// evaluated on a script.
 fn get_bit_depth(info: &VideoInfo) -> anyhow::Result<usize> {
-    let bits_per_sample = {
-        match info.format {
-            Property::Variable => {
-                bail!("Cannot output clips with variable format");
-            },
-            Property::Constant(x) => x.bits_per_sample(),
-        }
-    };
+    let bits_per_sample = info.format.bits_per_sample();
 
     Ok(bits_per_sample as usize)
 }
@@ -256,11 +208,7 @@ fn get_transfer(env: &Environment) -> anyhow::Result<u8> {
     // Get the output node.
     const OUTPUT_INDEX: i32 = 0;
 
-    #[cfg(feature = "vapoursynth_new_api")]
     let (node, _) = env.get_output(OUTPUT_INDEX)?;
-    #[cfg(not(feature = "vapoursynth_new_api"))]
-    let node = env.get_output(OUTPUT_INDEX).unwrap();
-
     let frame = node.get_frame(0).context("get_transfer")?;
     let transfer = frame.props().get::<i64>("_Transfer").map(|val| val as u8).unwrap_or(2);
 
@@ -336,7 +284,7 @@ fn import_lsmash<'core>(
     lsmash
         .invoke("LWLibavSource", &arguments)
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?
-        .get_node("clip")
+        .get_video_node("clip")
         .map_err(|_| anyhow::anyhow!(error_message.clone()))
 }
 
@@ -368,7 +316,7 @@ fn import_ffms2<'core>(
     ffms2
         .invoke("Source", &arguments)
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?
-        .get_node("clip")
+        .get_video_node("clip")
         .map_err(|_| anyhow::anyhow!(error_message.clone()))
 }
 
@@ -404,7 +352,7 @@ fn import_bestsource<'core>(
     bestsource
         .invoke("VideoSource", &arguments)
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?
-        .get_node("clip")
+        .get_video_node("clip")
         .map_err(|_| anyhow::anyhow!(error_message.clone()))
 }
 
@@ -444,7 +392,7 @@ fn trim_node<'core>(
 
     std.invoke("Trim", &arguments)
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?
-        .get_node("clip")
+        .get_video_node("clip")
         .map_err(|_| anyhow::anyhow!(error_message.clone()))
 }
 
@@ -483,7 +431,7 @@ pub fn resize_node<'core>(
 
     std.invoke("Bicubic", &arguments)
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?
-        .get_node("clip")
+        .get_video_node("clip")
         .map_err(|_| anyhow::anyhow!(error_message.clone()))
 }
 
@@ -504,7 +452,7 @@ fn select_every<'core>(
 
     std.invoke("SelectEvery", &arguments)
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?
-        .get_node("clip")
+        .get_video_node("clip")
         .map_err(|_| anyhow::anyhow!(error_message.clone()))
 }
 
@@ -559,7 +507,7 @@ fn compare_ssimulacra2<'core>(
             &arguments,
         )
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?
-        .get_node("clip")
+        .get_video_node("clip")
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?;
 
     Ok((
@@ -646,7 +594,7 @@ fn compare_butteraugli<'core>(
             &arguments,
         )
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?
-        .get_node("clip")
+        .get_video_node("clip")
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?;
 
     Ok((
@@ -707,37 +655,28 @@ fn compare_xpsnr<'core>(
     plugin
         .invoke("XPSNR", &arguments)
         .map_err(|_| anyhow::anyhow!(error_message.clone()))?
-        .get_node("clip")
+        .get_video_node("clip")
         .map_err(|_| anyhow::anyhow!(error_message.clone()))
 }
 
 #[inline]
-pub fn create_vs_file(
-    temp: &str,
-    source: &Path,
-    chunk_method: ChunkMethod,
-    scene_detection_downscale_height: Option<usize>,
-    scene_detection_pixel_format: Option<FFPixelFormat>,
-    scene_detection_scaler: &str,
-    is_proxy: bool,
-) -> anyhow::Result<(PathBuf, bool)> {
-    let (load_script_text, cache_file_already_exists) = generate_loadscript_text(
-        temp,
-        source,
-        chunk_method,
-        scene_detection_downscale_height,
-        scene_detection_pixel_format,
-        scene_detection_scaler,
-        is_proxy,
-    )?;
+pub fn create_vs_file(loadscript_args: &LoadscriptArgs) -> anyhow::Result<(PathBuf, bool)> {
+    let (load_script_text, cache_file_already_exists) =
+        generate_loadscript_text(&LoadscriptArgs {
+            temp:         loadscript_args.temp,
+            source:       loadscript_args.source,
+            chunk_method: loadscript_args.chunk_method,
+            is_proxy:     loadscript_args.is_proxy,
+            cache_mode:   loadscript_args.cache_mode,
+        })?;
     // Ensure the temp folder exists
-    let temp: &Path = temp.as_ref();
+    let temp: &Path = loadscript_args.temp.as_ref();
     let split_folder = temp.join("split");
     create_dir_all(&split_folder)?;
 
-    if chunk_method == ChunkMethod::DGDECNV {
-        let absolute_source = absolute(source)?;
-        let dgindexnv_output = split_folder.join(if is_proxy {
+    if loadscript_args.chunk_method == ChunkMethod::DGDECNV {
+        let absolute_source = absolute(loadscript_args.source)?;
+        let dgindexnv_output = split_folder.join(if loadscript_args.is_proxy {
             "index_proxy.dgi"
         } else {
             "index.dgi"
@@ -757,7 +696,7 @@ pub fn create_vs_file(
         }
     }
 
-    let load_script_path = split_folder.join(if is_proxy {
+    let load_script_path = split_folder.join(if loadscript_args.is_proxy {
         "loadscript_proxy.vpy"
     } else {
         "loadscript.vpy"
@@ -769,23 +708,29 @@ pub fn create_vs_file(
     Ok((load_script_path, cache_file_already_exists))
 }
 
+pub struct LoadscriptArgs<'a> {
+    pub temp:         &'a str,
+    pub source:       &'a Path,
+    pub chunk_method: ChunkMethod,
+    pub is_proxy:     bool,
+    pub cache_mode:   CacheSource,
+}
+
 #[inline]
 pub fn generate_loadscript_text(
-    temp: &str,
-    source: &Path,
-    chunk_method: ChunkMethod,
-    scene_detection_downscale_height: Option<usize>,
-    scene_detection_pixel_format: Option<FFPixelFormat>,
-    scene_detection_scaler: &str,
-    is_proxy: bool,
+    loadscript_args: &LoadscriptArgs,
 ) -> anyhow::Result<(String, bool)> {
-    let temp: &Path = temp.as_ref();
-    let source = absolute(source)?;
+    let temp: &Path = loadscript_args.temp.as_ref();
+    let source = absolute(loadscript_args.source)?;
 
     let cache_file = PathAbs::new(temp.join("split").join(format!(
         "{}cache.{}",
-        if is_proxy { "proxy_" } else { "" },
-        match chunk_method {
+        if loadscript_args.is_proxy {
+            "proxy_"
+        } else {
+            ""
+        },
+        match loadscript_args.chunk_method {
             ChunkMethod::FFMS2 => "ffindex",
             ChunkMethod::LSMASH => "lwi",
             ChunkMethod::DGDECNV => "dgi",
@@ -793,7 +738,7 @@ pub fn generate_loadscript_text(
             _ => return Err(anyhow!("invalid chunk method")),
         }
     )))?;
-    let chunk_method_lower = match chunk_method {
+    let chunk_method_lower = match loadscript_args.chunk_method {
         ChunkMethod::FFMS2 => "ffms2",
         ChunkMethod::LSMASH => "lsmash",
         ChunkMethod::DGDECNV => "dgdecnv",
@@ -802,9 +747,9 @@ pub fn generate_loadscript_text(
     };
 
     // Only used for DGDECNV
-    let dgindex_path = match chunk_method {
+    let dgindex_path = match loadscript_args.chunk_method {
         ChunkMethod::DGDECNV => {
-            let dgindexnv_output = temp.join("split").join(if is_proxy {
+            let dgindexnv_output = temp.join("split").join(if loadscript_args.is_proxy {
                 "index_proxy.dgi"
             } else {
                 "index.dgi"
@@ -815,13 +760,12 @@ pub fn generate_loadscript_text(
     };
 
     // Include rich loadscript.vpy and specify source, chunk_method, and cache_file
-    // Also specify downscale_height, pixel_format, and scaler for Scene Detection
     // TODO should probably check if the syntax for rust strings and escaping utf
     // and stuff like that is the same as in python
     let mut load_script_text = include_str!("loadscript.vpy")
         .replace(
             "source = os.environ.get(\"AV1AN_SOURCE\", None)",
-            &format!("source = r\"{}\"", match chunk_method {
+            &format!("source = r\"{}\"", match loadscript_args.chunk_method {
                 ChunkMethod::DGDECNV => dgindex_path.display(),
                 _ => source.display(),
             }),
@@ -831,30 +775,22 @@ pub fn generate_loadscript_text(
             &format!("chunk_method = {chunk_method_lower:?}"),
         );
 
-    if let Some(scene_detection_downscale_height) = scene_detection_downscale_height {
+    if loadscript_args.cache_mode == CacheSource::TEMP {
         load_script_text = load_script_text.replace(
-            "downscale_height = os.environ.get(\"AV1AN_DOWNSCALE_HEIGHT\", None)",
+            "cache_file = os.environ.get(\"AV1AN_CACHE_FILE\", None)",
             &format!(
-                "downscale_height = os.environ.get(\"AV1AN_DOWNSCALE_HEIGHT\", \
-                 {scene_detection_downscale_height})"
+                "cache_file = r\"{}\"",
+                dunce::simplified(cache_file.as_path()).display(),
             ),
         );
     }
-    if let Some(scene_detection_pixel_format) = scene_detection_pixel_format {
-        load_script_text = load_script_text.replace(
-            "sc_pix_format = os.environ.get(\"AV1AN_PIXEL_FORMAT\", None)",
-            &format!(
-                "pixel_format = os.environ.get(\"AV1AN_PIXEL_FORMAT\", \
-                 \"{scene_detection_pixel_format:?}\")"
-            ),
-        );
-    }
+
     load_script_text = load_script_text.replace(
-        "scaler = os.environ.get(\"AV1AN_SCALER\", None)",
-        &format!("scaler = os.environ.get(\"AV1AN_SCALER\", {scene_detection_scaler:?})"),
+        "cache_mode = os.environ.get(\"AV1AN_CACHE_MODE\", None)",
+        &format!("cache_mode = \"{}\"", loadscript_args.cache_mode),
     );
 
-    let cache_file_already_exists = match chunk_method {
+    let cache_file_already_exists = match loadscript_args.chunk_method {
         ChunkMethod::DGDECNV => dgindex_path.exists(),
         _ => cache_file.exists(),
     };
@@ -927,7 +863,7 @@ pub fn measure_butteraugli(
     // Cannot use eval_file because it causes file system access errors during
     // Target Quality probing
     // Consider using eval_file only when source is not in CWD
-    environment.eval_script(&source.as_script_text(None, None, None)?)?;
+    environment.eval_script(&source.as_script_text()?)?;
     let core = environment.get_core()?;
 
     let source_node = environment.get_output(0)?.0;
@@ -965,7 +901,7 @@ pub fn measure_ssimulacra2(
     environment.set_variables(&args)?;
     // Cannot use eval_file because it causes file system access errors during
     // Target Quality probing
-    environment.eval_script(&source.as_script_text(None, None, None)?)?;
+    environment.eval_script(&source.as_script_text()?)?;
     let core = environment.get_core()?;
 
     let source_node = environment.get_output(0)?.0;
@@ -1004,7 +940,7 @@ pub fn measure_xpsnr(
     environment.set_variables(&args)?;
     // Cannot use eval_file because it causes file system access errors during
     // Target Quality probing
-    environment.eval_script(&source.as_script_text(None, None, None)?)?;
+    environment.eval_script(&source.as_script_text()?)?;
     let core = environment.get_core()?;
 
     let source_node = environment.get_output(0)?.0;
